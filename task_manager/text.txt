@@ -1,0 +1,726 @@
+###model/User.java
+```
+package com.booze.task_manager.model;
+
+import jakarta.persistence.*;
+import lombok.*;
+import org.hibernate.annotations.CreationTimestamp;
+import org.springframework.security.core.GrantedAuthority;
+import org.springframework.security.core.userdetails.UserDetails;
+
+import java.time.Instant;
+import java.util.Collection;
+import java.util.Date;
+import java.util.List;
+import java.util.UUID;
+
+@Entity
+@Table(
+        name = "users",
+        uniqueConstraints = {@UniqueConstraint(name = "uk_users_email", columnNames = "email")})
+@Getter
+@Setter
+@NoArgsConstructor
+@AllArgsConstructor
+@Builder
+public class User{
+    @Id
+    @GeneratedValue(strategy = GenerationType.UUID)
+    private String id;
+
+    @Column(nullable = false, length = 100)
+    private String name;
+
+    @Column(nullable = false, unique = true, length = 255)
+    private String email;
+
+    @Column(nullable = false)
+    private String password;
+
+    @Column(nullable = false)
+    @Builder.Default
+    private boolean enabled = true;
+
+    @Column(nullable = false, updatable = false)
+    private Instant createdAt;
+
+    @Column(nullable = false)
+    private Instant updatedAt;
+
+    @PrePersist
+    void onCreate() {
+        Instant now = Instant.now();
+        createdAt = now;
+        updatedAt = now;
+    }
+
+    @PreUpdate
+    void onUpdate() {
+        updatedAt = Instant.now();
+    }
+}
+
+```
+
+###model/UserPrincipal.java
+```
+package com.booze.task_manager.model;
+
+import lombok.Getter;
+import org.springframework.security.core.GrantedAuthority;
+import org.springframework.security.core.authority.SimpleGrantedAuthority;
+import org.springframework.security.core.userdetails.UserDetails;
+
+import java.util.Collection;
+import java.util.List;
+
+@Getter
+public class UserPrincipal implements UserDetails {
+    private final String id;
+    private final String name;
+    private final String email;
+    private final String password;
+    private final boolean enabled;
+
+    private UserPrincipal(String id, String name, String email, String password, boolean enabled) {
+        this.id = id;
+        this.name = name;
+        this.email = email;
+        this.password = password;
+        this.enabled = enabled;
+    }
+
+    public static UserPrincipal from(User user) {
+        return new UserPrincipal(
+                user.getId(),
+                user.getName(),
+                user.getEmail(),
+                user.getPassword(),
+                user.isEnabled()
+        );
+    }
+
+    @Override
+    public Collection<? extends GrantedAuthority> getAuthorities() {
+        return List.of(new SimpleGrantedAuthority("ROLE_USER"));
+    }
+
+    @Override
+    public String getPassword() {
+        return password;
+    }
+
+    @Override
+    public String getUsername() {
+        return email;
+    }
+
+    @Override
+    public boolean isAccountNonExpired() {
+        return true;
+    }
+
+    @Override
+    public boolean isAccountNonLocked() {
+        return true;
+    }
+
+    @Override
+    public boolean isCredentialsNonExpired() {
+        return true;
+    }
+
+    @Override
+    public boolean isEnabled() {
+        return enabled;
+    }
+}
+
+```
+
+###model/RevokedToken.java
+```
+package com.booze.task_manager.model;
+
+import jakarta.persistence.*;
+import lombok.*;
+
+import java.time.Instant;
+
+@Entity
+@Table(
+        name = "revoked_tokens",
+        indexes = {@Index(name = "idx_revoked_token_jti", columnList = "jti")})
+@Getter
+@Setter
+@NoArgsConstructor
+@AllArgsConstructor
+@Builder
+public class RevokedToken {
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private long id;
+
+    @Column(nullable = false, unique = true, length = 100)
+    private String jti;
+
+    @Column(nullable = false)
+    private Instant expiresAt;
+
+    @Column(nullable = false)
+    private Instant revokedAt;
+}
+
+```
+
+###config/JwtAuthFilter.java
+```
+package com.booze.task_manager.config;
+
+import com.booze.task_manager.model.UserPrincipal;
+import com.booze.task_manager.service.JwtService;
+import com.booze.task_manager.service.TokenRevocationService;
+import com.booze.task_manager.service.UserDetailServiceImpl;
+import io.jsonwebtoken.Claims;
+import io.jsonwebtoken.JwtException;
+import jakarta.servlet.FilterChain;
+import jakarta.servlet.ServletException;
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
+import lombok.RequiredArgsConstructor;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.stereotype.Component;
+import org.springframework.web.filter.OncePerRequestFilter;
+
+import java.io.IOException;
+
+@Component
+@RequiredArgsConstructor
+public class JwtAuthFilter extends OncePerRequestFilter {
+    private final JwtService jwtService;
+    private final UserDetailServiceImlp userDetailsService;
+    private final TokenRevocationService revocationService;
+
+    @Override
+    protected void doFilterInternal(HttpServletRequest request,
+                                    HttpServletResponse response,
+                                    FilterChain filterChain) throws ServletException, IOException {
+        String authHeader = request.getHeader("Authorization");
+
+        if (authHeader == null || !authHeader.startsWith("Bearer ")) {
+            filterChain.doFilter(request, response);
+
+            return;
+        }
+
+        String token = authHeader.substring(7);
+        try {
+            Claims claims = jwtService.parseToken(token);
+            String jti = claims.getId();
+
+            if (jti == null || revocationService.isRevoked(jti)) {
+                unauthorized(response);
+                return;
+            }
+
+            String userId = claims.getSubject();
+
+            if (userId == null) {
+                unauthorized(response);
+                return;
+            }
+
+            UserPrincipal user = (UserPrincipal) userDetailsService.loadById(userId);
+
+            if (!user.isEnabled()) {
+                unauthorized(response);
+                return;
+            }
+
+            UsernamePasswordAuthenticationToken authentication = new UsernamePasswordAuthenticationToken(
+                    user,
+                    null,
+                    user.getAuthorities());
+
+            SecurityContextHolder.getContext().setAuthentication(authentication);
+            filterChain.doFilter(request, response);
+        } catch (JwtException | IllegalArgumentException e) {
+            unauthorized(response);
+        }
+    }
+
+    private void unauthorized(HttpServletResponse response) throws IOException {
+        response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
+        response.setContentType("application/json");
+        response.getWriter().write("""
+                {
+                    "error": "Unauthorized",
+                    "message": "Invalid or expired authentication token"
+                }
+                """);
+    }
+}
+
+```
+
+###config/PasswordConfig.java
+```
+package com.booze.task_manager.config;
+
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.security.crypto.factory.PasswordEncoderFactories;
+import org.springframework.security.crypto.password.PasswordEncoder;
+
+@Configuration
+public class PasswordConfig {
+    @Bean
+    public PasswordEncoder passwordEncoder() {
+        return PasswordEncoderFactories.createDelegatingPasswordEncoder();
+    }
+}
+
+```
+
+###config/SecurityBeans.java
+```
+package com.booze.task_manager.config;
+
+import lombok.RequiredArgsConstructor;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.security.authentication.AuthenticationManager;
+import org.springframework.security.config.annotation.authentication.configuration.AuthenticationConfiguration;
+
+@Configuration
+@RequiredArgsConstructor
+public class SecurityBeans {
+    @Bean
+    public AuthenticationManager authenticationManager(AuthenticationConfiguration configuration) throws Exception {
+        return configuration.getAuthenticationManager();
+    }
+}
+
+```
+
+###config/SecurityConfig.java
+```
+package com.booze.task_manager.config;
+
+import lombok.RequiredArgsConstructor;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.security.config.annotation.web.builders.HttpSecurity;
+import org.springframework.security.config.http.SessionCreationPolicy;
+import org.springframework.security.web.SecurityFilterChain;
+import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
+
+@Configuration
+@RequiredArgsConstructor
+public class SecurityConfig {
+    private final JwtAuthFilter jwtAuthFilter;
+
+    @Bean
+    public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception{
+        http
+                .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
+                .csrf(csrf -> csrf.disable())
+                .authorizeHttpRequests(auth -> auth
+                        .requestMatchers("/api/auth/signup", "/api/auth/login", "/api/auth/refresh").permitAll()
+                        .anyRequest().authenticated())
+                .addFilterBefore(jwtAuthFilter, UsernamePasswordAuthenticationFilter.class);
+
+        return http.build();
+    }
+}
+
+```
+
+###controller/AuthController.java
+```
+package com.booze.task_manager.controller;
+
+import com.booze.task_manager.dto.LoginRequest;
+import com.booze.task_manager.dto.RegisterRequest;
+import com.booze.task_manager.dto.AuthResponse;
+import com.booze.task_manager.service.AuthService;
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.validation.Valid;
+import lombok.RequiredArgsConstructor;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RestController;
+
+@RestController
+@RequestMapping("/api/auth")
+@RequiredArgsConstructor
+public class AuthController {
+    private final AuthService authService;
+
+
+    @PostMapping("/signup")
+    public ResponseEntity<AuthResponse> register(@Valid @RequestBody RegisterRequest request) {
+
+        return ResponseEntity
+                .status(HttpStatus.CREATED)
+                .body(authService.signup(request));
+    }
+
+    @PostMapping("/login")
+    public ResponseEntity<AuthResponse> login(@Valid @RequestBody LoginRequest request) {
+
+        return ResponseEntity.ok(authService.login(request));
+    }
+
+    @PostMapping("/logout")
+    public ResponseEntity<Void> logout(HttpServletRequest request) {
+        authService.logout(request);
+
+        return ResponseEntity.noContent().build();
+    }
+}
+
+```
+
+###controller/UserController.java
+```
+package com.booze.task_manager.controller;
+
+import com.booze.task_manager.dto.UserResponse;
+import com.booze.task_manager.model.UserPrincipal;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.web.bind.annotation.*;
+
+@RestController
+@RequestMapping("/api/users")
+public class UserController {
+
+    @GetMapping("/me")
+    public UserResponse me(@AuthenticationPrincipal UserPrincipal user) {
+
+        return new UserResponse(
+                user.getId(),
+                user.getName(),
+                user.getEmail()
+        );
+    }
+}
+
+```
+
+###repo/UserRepo.java
+```
+package com.booze.task_manager.repo;
+
+import com.booze.task_manager.model.RevokedToken;
+import org.springframework.data.jpa.repository.JpaRepository;
+
+import java.util.Optional;
+
+public interface RevokedTokenRepo extends JpaRepository<RevokedToken, Long> {
+    Optional<RevokedToken> findByJti(String jti);
+    boolean existsByJti(String jti);
+}
+
+```
+
+###repo/RevokedTokenRepo.java
+```
+package com.booze.task_manager.repo;
+
+import com.booze.task_manager.model.User;
+import org.springframework.data.jpa.repository.JpaRepository;
+
+import java.util.Optional;
+
+public interface UserRepo extends JpaRepository<User, String> {
+    Optional<User> findByEmailIgnoreCase(String email);
+
+    boolean existsByEmailIgnoreCase(String email);
+}
+
+```
+
+###service/AuthService.java
+```
+package com.booze.task_manager.service;
+
+import com.booze.task_manager.dto.AuthResponse;
+import com.booze.task_manager.dto.LoginRequest;
+import com.booze.task_manager.dto.RegisterRequest;
+import com.booze.task_manager.model.User;
+import com.booze.task_manager.repo.UserRepo;
+import io.jsonwebtoken.JwtException;
+import jakarta.servlet.http.HttpServletRequest;
+import lombok.Data;
+import lombok.RequiredArgsConstructor;
+import org.springframework.security.authentication.AuthenticationManager;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.stereotype.Service;
+
+import java.util.Date;
+
+@Service
+@RequiredArgsConstructor
+public class AuthService {
+    private final UserRepo userRepo;
+    private final PasswordEncoder passwordEncoder;
+    private final AuthenticationManager authenticationManager;
+    private final JwtService jwtService;
+    private final TokenRevocationService tokenRevocationService;
+
+    public AuthResponse signup(RegisterRequest request) {
+        String email = request.email().trim().toLowerCase();
+
+        if (userRepo.existsByEmailIgnoreCase(email)) {
+            throw new IllegalArgumentException("Unable to create account");
+        }
+
+        User user = User.builder()
+                .name(request.name().trim())
+                .email(email)
+                .password(passwordEncoder.encode(request.password()))
+                .enabled(true)
+                .build();
+
+        userRepo.save(user);
+
+        return createTokens(user);
+    }
+
+    public AuthResponse login(LoginRequest request) {
+        String email = request.email().trim().toLowerCase();
+
+        authenticationManager.authenticate(new UsernamePasswordAuthenticationToken(email, request.password()));
+
+        User user = userRepo.findByEmailIgnoreCase(email).orElseThrow();
+
+        return createTokens(user);
+    }
+
+    private AuthResponse createTokens(User user) {
+        String accessToken = jwtService.generateAccessToken(user.getId());
+
+        return new AuthResponse(
+                accessToken,
+                null,
+                "Bearer "
+        );
+    }
+
+    public void logout(HttpServletRequest request) {
+        String header = request.getHeader("Authorization");
+
+        if (header != null && header.startsWith("Bearer")) {
+            String token = header.substring(7);
+
+            try {
+                String jti = jwtService.getJti(token);
+                Date expiration = jwtService.getExpiration(token);
+                tokenRevocationService.revoke(jti, expiration.toInstant());
+            } catch (JwtException ignored) {
+
+            }
+        }
+    }
+}
+
+```
+
+###service/JwtService.java
+```
+package com.booze.task_manager.service;
+
+import io.jsonwebtoken.Claims;
+import io.jsonwebtoken.JwtException;
+import io.jsonwebtoken.Jwts;
+import io.jsonwebtoken.security.Keys;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.stereotype.Service;
+
+import javax.crypto.SecretKey;
+import java.nio.charset.StandardCharsets;
+import java.util.Date;
+import java.util.UUID;
+
+@Service
+public class JwtService {
+    private final SecretKey key;
+    private final long accessTokenExpiration;
+
+    public JwtService(
+            @Value("${app.jwt.secret}") String secret,
+            @Value("${app.jwt.access-token-expiration}") long accessTokenExpiration) {
+        this.key = Keys.hmacShaKeyFor(secret.getBytes(StandardCharsets.UTF_8));
+        this.accessTokenExpiration = accessTokenExpiration;
+    }
+
+    public String generateAccessToken(String userId) {
+        Date now = new Date();
+
+        return Jwts.builder()
+                .subject(userId)
+                .issuer("secure-auth")
+                .id(UUID.randomUUID().toString())
+                .issuedAt(now)
+                .expiration(new Date(now.getTime() + accessTokenExpiration))
+                .signWith(key, Jwts.SIG.HS256)
+                .compact();
+    }
+
+    public Claims parseToken(String token) {
+        return Jwts.parser()
+                .verifyWith(key)
+                .requireIssuer("secure-auth")
+                .build()
+                .parseSignedClaims(token)
+                .getPayload();
+    }
+
+    public String getUserId(String token) {
+        return parseToken(token).getSubject();
+    }
+
+    public String getJti(String token) {
+        return parseToken(token).getId();
+    }
+
+    public Date getExpiration(String token) {
+        return parseToken(token).getExpiration();
+    }
+
+    public boolean isExpired(String token) {
+        try {
+            return parseToken(token)
+                    .getExpiration()
+                    .before(new Date());
+        } catch (JwtException | IllegalArgumentException e) {
+            return true;
+        }
+    }
+}
+
+```
+
+###service/TokenRevocationService.java
+```
+package com.booze.task_manager.service;
+
+import com.booze.task_manager.model.RevokedToken;
+import com.booze.task_manager.repo.RevokedTokenRepo;
+import lombok.RequiredArgsConstructor;
+import org.springframework.stereotype.Service;
+
+import java.time.Instant;
+
+@Service
+@RequiredArgsConstructor
+public class TokenRevocationService {
+    private final RevokedTokenRepo repo;
+
+    public void revoke(String jti, Instant expiresAt) {
+        if (repo.existsByJti(jti)) {
+            return;
+        }
+
+        repo.save(
+                RevokedToken.builder()
+                        .jti(jti)
+                        .expiresAt(expiresAt)
+                        .revokedAt(Instant.now())
+                        .build()
+        );
+    }
+
+    public boolean isRevoked(String jti) {
+        return repo.existsByJti(jti);
+    }
+}
+
+```
+
+###service/UserDetailsImlpService.java
+```
+package com.booze.task_manager.service;
+
+import com.booze.task_manager.model.User;
+import com.booze.task_manager.model.UserPrincipal;
+import com.booze.task_manager.repo.UserRepo;
+import lombok.RequiredArgsConstructor;
+import org.springframework.security.core.userdetails.UserDetails;
+import org.springframework.security.core.userdetails.UsernameNotFoundException;
+import org.springframework.stereotype.Service;
+
+@Service
+@RequiredArgsConstructor
+public class UserDetailServiceImlp {
+    private final UserRepo userRepo;
+
+    public UserDetails loadById(String userId) {
+        User user = userRepo
+                .findById(userId)
+                .orElseThrow(() -> new UsernameNotFoundException("User not found"));
+
+        return UserPrincipal.from(user);
+    }
+
+    public UserDetails loadByEmail(String email) {
+        User user = userRepo
+                .findByEmailIgnoreCase(email)
+                .orElseThrow(() -> new UsernameNotFoundException("Invalid email or password"));
+
+        return UserPrincipal.from(user);
+    }
+}
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+spring:
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: validate   # use "update" ONLY locally; in real envs use Flyway/Liquibase migrations
+
+server:
+  error:
+    include-message: never
+    include-stacktrace: never
+    include-binding-errors: never
+
+app:
+  jwt:
+    secret: ${JWT_SECRET}                      # >= 32 random bytes, from env / secret manager. NEVER commit it.
+    access-token-expiration: 900000            # 15 minutes (ms)
+    refresh-token-expiration: 1209600000       # 14 days (ms)
+  cors:
+    allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:3000}

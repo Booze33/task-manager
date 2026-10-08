@@ -1,103 +1,62 @@
 package com.booze.task_manager.model;
 
 import jakarta.persistence.*;
-import org.hibernate.annotations.CreationTimestamp;
-import org.springframework.security.core.GrantedAuthority;
-import org.springframework.security.core.userdetails.UserDetails;
+import lombok.*;
 
-import java.util.Collection;
-import java.util.Date;
-import java.util.List;
-import java.util.UUID;
+import java.time.Instant;
 
-@Table(name = "users")
 @Entity
-public class User implements UserDetails{
+@Table(
+        name = "users",
+        uniqueConstraints = {@UniqueConstraint(name = "uk_users_email", columnNames = "email")})
+@Getter
+@Setter
+@NoArgsConstructor
+@AllArgsConstructor
+@Builder
+public class User{
     @Id
     @GeneratedValue(strategy = GenerationType.UUID)
-    @Column(nullable = false)
-    private UUID id;
+    private String id;
 
-    @Column(nullable = false)
-    private String full_name;
+    @Column(nullable = false, length = 100)
+    private String name;
 
-    @Column(unique = true, length = 100, nullable = false)
+    @Column(nullable = false, unique = true, length = 255)
     private String email;
 
     @Column(nullable = false)
     private String password;
 
-    @CreationTimestamp
-    @Column(updatable = false, name = "joined_at")
-    private Date joinedAT;
+    @Column(nullable = false)
+    @Builder.Default
+    private boolean enabled = true;
 
-    public UUID getId() {
-        return id;
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false, length = 20)
+    @Builder.Default
+    private Role role = Role.USER;
+
+    @Column(nullable = false)
+    private int failedLoginAttempts;
+
+    private Instant lockedUntil;
+
+    @Column(nullable = false, updatable = false)
+    private Instant createdAt;
+
+    @Column(nullable = false)
+    private Instant updatedAt;
+
+    @PrePersist
+    void onCreate() {
+        Instant now = Instant.now();
+        createdAt = now;
+        updatedAt = now;
     }
 
-    public void setId(UUID id) {
-        this.id = id;
-    }
-
-    public String getFull_name() {
-        return full_name;
-    }
-
-    public void setFull_name(String full_name) {
-        this.full_name = full_name;
-    }
-
-    public String getEmail() {
-        return email;
-    }
-
-    public void setEmail(String email) {
-        this.email = email;
-    }
-
-    @Override
-    public Collection<? extends GrantedAuthority> getAuthorities() {
-        return List.of();
-    }
-
-    public String getPassword() {
-        return password;
-    }
-
-    @Override
-    public String getUsername() {
-        return email;
-    }
-
-    @Override
-    public boolean isAccountNonExpired() {
-        return UserDetails.super.isAccountNonExpired();
-    }
-
-    @Override
-    public boolean isAccountNonLocked() {
-        return UserDetails.super.isAccountNonLocked();
-    }
-
-    @Override
-    public boolean isCredentialsNonExpired() {
-        return UserDetails.super.isCredentialsNonExpired();
-    }
-
-    @Override
-    public boolean isEnabled() {
-        return UserDetails.super.isEnabled();
-    }
-
-    public void setPassword(String password) {
-        this.password = password;
-    }
-
-    public Date getJoinedAT() {
-        return joinedAT;
-    }
-
-    public void setJoinedAT(Date joinedAT) {
-        this.joinedAT = joinedAT;
+    @PreUpdate
+    void onUpdate() {
+        updatedAt = Instant.now();
     }
 }
