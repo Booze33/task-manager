@@ -1,8 +1,11 @@
 package com.booze.task_manager.exception;
 
-
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.http.*;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.HttpStatusCode;
+import org.springframework.http.ProblemDetail;
+import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.core.AuthenticationException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
@@ -14,13 +17,18 @@ import org.springframework.web.servlet.mvc.method.annotation.ResponseEntityExcep
 import java.util.LinkedHashMap;
 import java.util.Map;
 
+/**
+ * THIS is what fixes your "everything returns 403" symptom at the source:
+ * exceptions are turned into proper JSON responses here, so Spring never
+ * forwards them to the secured /error endpoint.
+ */
 @RestControllerAdvice
 @Slf4j
 public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
+
     @Override
     protected ResponseEntity<Object> handleMethodArgumentNotValid(
-            MethodArgumentNotValidException ex, HttpHeaders headers, HttpStatusCode status, WebRequest request
-    ) {
+            MethodArgumentNotValidException ex, HttpHeaders headers, HttpStatusCode status, WebRequest request) {
         Map<String, String> errors = new LinkedHashMap<>();
         ex.getBindingResult().getFieldErrors()
                 .forEach(e -> errors.putIfAbsent(e.getField(), e.getDefaultMessage()));
@@ -29,6 +37,7 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
         return ResponseEntity.badRequest().body(pd);
     }
 
+    // BadCredentials, Locked, Disabled, etc. all collapse to ONE message so attackers learn nothing.
     @ExceptionHandler({AuthenticationException.class, InvalidRefreshTokenException.class})
     public ResponseEntity<ProblemDetail> handleAuth(Exception ex) {
         ProblemDetail pd = ProblemDetail.forStatusAndDetail(HttpStatus.UNAUTHORIZED, "Invalid credentials");

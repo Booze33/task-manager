@@ -1,10 +1,8 @@
 package com.booze.task_manager.controller;
 
 import com.booze.task_manager.dto.*;
-import com.booze.task_manager.model.User;
 import com.booze.task_manager.model.UserPrincipal;
 import com.booze.task_manager.service.AuthService;
-import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpHeaders;

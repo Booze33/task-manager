@@ -16,13 +16,13 @@ public class RevokedToken {
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private long id;
-    
+
     @Column(nullable = false, unique = true, length = 100)
     private String jti;
-    
+
     @Column(nullable = false)
     private Instant expiresAt;
-    
+
     @Column(nullable = false)
     private Instant revokedAt;
 }

@@ -20,11 +20,11 @@ import org.springframework.web.filter.OncePerRequestFilter;
 
 import java.io.IOException;
 
-import static org.aspectj.weaver.NameMangler.PREFIX;
-
 @Component
 @RequiredArgsConstructor
 public class JwtAuthFilter extends OncePerRequestFilter {
+    private static final String PREFIX = "Bearer ";
+
     private final JwtService jwtService;
     private final UserDetailServiceImpl userDetailsService;
     private final TokenRevocationService revocationService;
@@ -39,40 +39,7 @@ public class JwtAuthFilter extends OncePerRequestFilter {
             authenticate(header.substring(PREFIX.length()).trim());
         }
 
-        String token = header.substring(7);
-        try {
-            Claims claims = jwtService.parseToken(token);
-            String jti = claims.getId();
-
-            if (jti == null || revocationService.isRevoked(jti)) {
-                unauthorized(response);
-                return;
-            }
-
-            String userId = claims.getSubject();
-
-            if (userId == null) {
-                unauthorized(response);
-                return;
-            }
-
-            UserPrincipal user = (UserPrincipal) userDetailsService.loadById(userId);
-
-            if (!user.isEnabled()) {
-                unauthorized(response);
-                return;
-            }
-
-            UsernamePasswordAuthenticationToken authentication = new UsernamePasswordAuthenticationToken(
-                    user,
-                    null,
-                    user.getAuthorities());
-
-            SecurityContextHolder.getContext().setAuthentication(authentication);
-            filterChain.doFilter(request, response);
-        } catch (JwtException | IllegalArgumentException e) {
-            unauthorized(response);
-        }
+        filterChain.doFilter(request, response);
     }
 
     private void authenticate(String token) {
@@ -96,16 +63,5 @@ public class JwtAuthFilter extends OncePerRequestFilter {
         } catch (JwtException | IllegalArgumentException | UsernameNotFoundException e) {
             SecurityContextHolder.clearContext();
         }
-    }
-
-    private void unauthorized(HttpServletResponse response) throws IOException {
-        response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
-        response.setContentType("application/json");
-        response.getWriter().write("""
-                {
-                    "error": "Unauthorized",
-                    "message": "Invalid or expired authentication token"
-                }
-                """);
     }
 }

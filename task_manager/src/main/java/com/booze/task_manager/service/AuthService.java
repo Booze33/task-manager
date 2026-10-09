@@ -11,8 +11,6 @@ import com.booze.task_manager.model.UserPrincipal;
 import com.booze.task_manager.repo.UserRepo;
 import io.jsonwebtoken.Claims;
 import io.jsonwebtoken.JwtException;
-import jakarta.servlet.http.HttpServletRequest;
-import lombok.Data;
 import lombok.RequiredArgsConstructor;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.security.authentication.AuthenticationManager;
@@ -22,7 +20,6 @@ import org.springframework.security.core.Authentication;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 
-import java.util.Date;
 import java.util.Locale;
 
 @Service
@@ -39,7 +36,6 @@ public class AuthService {
     private final LoginAttemptService loginAttemptService;
 
     public AuthResponse signup(RegisterRequest request) {
-        System.out.println("=======================signup========");
         String email = request.email().trim().toLowerCase(Locale.ROOT);
 
         if (userRepo.existsByEmailIgnoreCase(email)) {
