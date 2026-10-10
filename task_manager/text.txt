@@ -1,68 +1,42 @@
-package com.booze.task_manager.config;
 
-import com.booze.task_manager.model.UserPrincipal;
-import com.booze.task_manager.service.JwtService;
-import com.booze.task_manager.service.TokenRevocationService;
-import com.booze.task_manager.service.UserDetailServiceImpl;
-import io.jsonwebtoken.Claims;
-import io.jsonwebtoken.JwtException;
-import jakarta.servlet.FilterChain;
-import jakarta.servlet.ServletException;
-import jakarta.servlet.http.HttpServletRequest;
-import jakarta.servlet.http.HttpServletResponse;
-import lombok.RequiredArgsConstructor;
-import org.springframework.http.HttpHeaders;
-import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
-import org.springframework.security.core.context.SecurityContextHolder;
-import org.springframework.security.core.userdetails.UsernameNotFoundException;
-import org.springframework.stereotype.Component;
-import org.springframework.web.filter.OncePerRequestFilter;
+package com.booze.task_manager.service;
 
-import java.io.IOException;
+import com.booze.task_manager.dto.TaskRequest;
+import com.booze.task_manager.model.Task;
+import com.booze.task_manager.model.User;
+import com.booze.task_manager.repository.TaskRepository;
+import com.booze.task_manager.repository.UserRepository;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
-@Component
-@RequiredArgsConstructor
-public class JwtAuthFilter extends OncePerRequestFilter {
-    private static final String PREFIX = "Bearer ";
+@Service
+public class TaskService {
 
-    private final JwtService jwtService;
-    private final UserDetailServiceImpl userDetailsService;
-    private final TokenRevocationService revocationService;
+    private final TaskRepository taskRepository;
+    private final UserRepository userRepository;
 
-    @Override
-    protected void doFilterInternal(HttpServletRequest request,
-                                    HttpServletResponse response,
-                                    FilterChain filterChain) throws ServletException, IOException {
-        String header = request.getHeader(HttpHeaders.AUTHORIZATION);
-
-        if (header != null && header.regionMatches(true, 0, PREFIX, 0, PREFIX.length())) {
-            authenticate(header.substring(PREFIX.length()).trim());
-        }
-
-        // Always continue. This filter never writes a response; SecurityConfig decides 401/403.
-        filterChain.doFilter(request, response);
+    public TaskService(
+            TaskRepository taskRepository,
+            UserRepository userRepository
+    ) {
+        this.taskRepository = taskRepository;
+        this.userRepository = userRepository;
     }
 
-    private void authenticate(String token) {
-        try {
-            Claims claims = jwtService.parseToken(token);
-            String jti = claims.getId();
-            String userId = claims.getSubject();
+    @Transactional
+    public Task createTask(TaskRequest request) {
+        User user = userRepository.findById(request.userId())
+                .orElseThrow(() ->
+                        new IllegalArgumentException("User not found")
+                );
 
-            if (jti == null || userId == null || revocationService.isRevoked(jti)) {
-                return;
-            }
+        Task task = new Task();
+        task.setUser(user);
+        task.setTitle(request.title());
+        task.setDescription(request.description());
+        task.setPriority(request.priority());
+        task.setDueDate(request.dueDate());
 
-            UserPrincipal user = userDetailsService.loadById(userId);
-            if (!user.isEnabled()) {
-                return;
-            }
-
-            UsernamePasswordAuthenticationToken authentication =
-                    new UsernamePasswordAuthenticationToken(user, null, user.getAuthorities());
-            SecurityContextHolder.getContext().setAuthentication(authentication);
-        } catch (JwtException | IllegalArgumentException | UsernameNotFoundException e) {
-            SecurityContextHolder.clearContext();
-        }
+        return taskRepository.save(task);
     }
 }
