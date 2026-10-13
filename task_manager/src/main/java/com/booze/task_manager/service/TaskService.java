@@ -1,31 +1,109 @@
 package com.booze.task_manager.service;
 
+import com.booze.task_manager.dto.TaskPageResponse;
 import com.booze.task_manager.dto.TaskRequest;
+import com.booze.task_manager.exception.InvalidTaskFilterException;
+import com.booze.task_manager.exception.TaskNotFoundException;
 import com.booze.task_manager.model.Task;
+import com.booze.task_manager.model.TaskStatus;
 import com.booze.task_manager.model.User;
 import com.booze.task_manager.repo.TaskRepo;
 import com.booze.task_manager.repo.UserRepo;
 import jakarta.transaction.Transactional;
+import jakarta.validation.constraints.Max;
+import jakarta.validation.constraints.Min;
 import lombok.RequiredArgsConstructor;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
+
+import java.time.Instant;
 
 @Service
 @RequiredArgsConstructor
 public class TaskService {
     private final TaskRepo taskRepo;
     private final UserRepo userRepo;
+    private final StatsCacheService statsCacheService;
 
-    @Transactional
-    public Task create(TaskRequest request) {
-        User user = userRepo.findById(request.user_id())
-                .orElseThrow(() -> new IllegalArgumentException("User not found"));
+    @Transactional()
+    public Task create(String userId, TaskRequest request) {
+        User user = userRepo.findById(userId)
+                .orElseThrow(TaskNotFoundException::new);
 
         Task task = new Task();
-        task.setUser(user);
+        task.setOwner(user);
         task.setTitle(request.title());
         task.setDescription(request.description());
+        task.setStatus(TaskStatus.TODO);
         task.setPriority(request.priority());
 
         return taskRepo.save(task);
+    }
+
+    @Transactional
+    public Completion complete(String userId, String taskId) {
+        int updated = taskRepo.completeIfNotDone(taskId, userId, TaskStatus.DONE, Instant.now());
+        Task task = taskRepo.findOwnedTask(taskId, userId).orElseThrow(TaskNotFoundException::new);
+
+        invalidateStatsAfterCommit(userId);
+        return new Completion(task, updated == 0);
+    }
+
+    public void invalidateStatsAfterCommit(String userId){
+        if (!TransactionSynchronizationManager.isSynchronizationActive()) {
+            statsCacheService.invalidate(userId);
+            return;
+        }
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override
+            public void afterCommit() {
+                statsCacheService.invalidate(userId);
+            }
+        });
+    }
+
+    public TaskPageResponse list(String userId, int page, int size, String rawStatus) {
+        TaskStatus status = parseStatus(rawStatus);
+
+        Page<Task> result = taskRepo.findTasks(
+                userId,
+                status,
+                PageRequest.of(page - 1, size, Sort.by(
+                        Sort.Order.desc("CreatedAt"),
+                        Sort.Order.desc("id"))));
+
+        return new TaskPageResponse(
+                result.getContent().stream().map(Task).toList(),
+                result.getTotalElements(),
+                page,
+                size,
+                result.getTotalPages()
+        );
+    }
+
+    private static TaskStatus parseStatus(String rawStatus) {
+        String status = normalizeFilter(rawStatus);
+        if (status == null) {
+            return null;
+        }
+        try {
+            return TaskStatus.fromValue(status);
+        } catch (IllegalArgumentException exception) {
+            throw new InvalidTaskFilterException(status);
+        }
+    }
+
+    private static String normalizeFilter(String filter) {
+        if (filter == null || filter.isBlank()) {
+            return null;
+        }
+        return filter.trim();
+    }
+
+    public record Completion(Task task, boolean idempotent) {
     }
 }
