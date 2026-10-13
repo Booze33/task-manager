@@ -1,0 +1,11 @@
+
+## Recommended implementation plan
+
+1. **Align task model, migration, request, and response DTOs** with the client’s task fields. Derive ownership from the authenticated user, validate requests, and return a DTO the client accepts.
+2. **Complete task listing behavior:** add the habit filter, confirm one-based pagination, use stable ordering, and test status/habit filtering and empty pages.
+3. **Fix completion and persistence consistency:** align `completedAt`/`completed_at`, ensure completion is atomic and user-scoped, and invalidate stats after both creation and first completion.
+4. **Implement the remaining operational requirements:** Redis-backed per-user stats cache and rate limiting; expose the required headers through CORS.
+5. **Add backend tests** for route shapes, validation, ownership, pagination/filters, duplicate completion, stats caching/invalidation, and CORS.
+6. **Run client/backend integration checks** for auth, task flows, stats, and error handling; set the actual deployed API URL when known.
+
+**Verification:** `npm run build` passes for the client. Backend compilation could not be verified because the available environment has Java 17 while the Maven project requires Java 21; that mismatch is also documented in `pom.xml`. No files were changed during this audit.

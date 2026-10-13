@@ -1,0 +1,7 @@
+ALTER TABLE tasks
+    ADD COLUMN IF NOT EXISTS habit VARCHAR(100) NOT NULL DEFAULT 'General';
+
+ALTER TABLE tasks
+    ADD COLUMN IF NOT EXISTS due_date DATE NOT NULL DEFAULT CURRENT_DATE;
+
+CREATE INDEX IF NOT EXISTS idx_tasks_owner_habit ON tasks (owner_id, habit);

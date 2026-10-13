@@ -9,10 +9,12 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.core.AuthenticationException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
+import org.springframework.web.method.annotation.HandlerMethodValidationException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.context.request.WebRequest;
 import org.springframework.web.servlet.mvc.method.annotation.ResponseEntityExceptionHandler;
+import jakarta.validation.ConstraintViolationException;
 
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -34,6 +36,19 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
                 .forEach(e -> errors.putIfAbsent(e.getField(), e.getDefaultMessage()));
         ProblemDetail pd = ProblemDetail.forStatusAndDetail(HttpStatus.BAD_REQUEST, "Validation failed");
         pd.setProperty("errors", errors);
+        return ResponseEntity.badRequest().body(pd);
+    }
+
+    @Override
+    protected ResponseEntity<Object> handleHandlerMethodValidationException(
+            HandlerMethodValidationException ex, HttpHeaders headers, HttpStatusCode status, WebRequest request) {
+        ProblemDetail pd = ProblemDetail.forStatusAndDetail(HttpStatus.BAD_REQUEST, "Request parameters are invalid");
+        return ResponseEntity.badRequest().body(pd);
+    }
+
+    @ExceptionHandler({InvalidTaskFilterException.class, ConstraintViolationException.class})
+    public ResponseEntity<ProblemDetail> handleInvalidRequest(Exception ex) {
+        ProblemDetail pd = ProblemDetail.forStatusAndDetail(HttpStatus.BAD_REQUEST, ex.getMessage());
         return ResponseEntity.badRequest().body(pd);
     }
 

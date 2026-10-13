@@ -6,6 +6,13 @@ export interface User {
   email: string
 }
 
+export interface AuthTokens {
+  accessToken: string
+  refreshToken: string
+  tokenType: 'Bearer'
+  expiresIn: number
+}
+
 export interface Task {
   id: string
   title: string
@@ -39,8 +46,10 @@ export interface ApiErrorField {
 }
 
 export interface ApiErrorBody {
-  message: string
-  errors?: ApiErrorField[]
+  message?: string
+  detail?: string
+  title?: string
+  errors?: Record<string, string> | ApiErrorField[]
 }
 
 export interface ActivityEntry {
@@ -50,7 +59,7 @@ export interface ActivityEntry {
   status: number
   latency: number
   cache?: 'HIT' | 'MISS'
-  remaining: number
+  remaining: number | null
   idempotent?: boolean
   timestamp: string
 }

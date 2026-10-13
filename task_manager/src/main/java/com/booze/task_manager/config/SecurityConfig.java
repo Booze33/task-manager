@@ -26,6 +26,7 @@ import java.util.List;
 @RequiredArgsConstructor
 public class SecurityConfig {
     private final JwtAuthFilter jwtAuthFilter;
+    private final ApiRateLimitFilter apiRateLimitFilter;
 
     @Bean
     public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception{
@@ -55,6 +56,7 @@ public class SecurityConfig {
                                 "/api/auth/refresh").permitAll()
                         .anyRequest().authenticated())
                 .addFilterBefore(jwtAuthFilter, UsernamePasswordAuthenticationFilter.class);
+        http.addFilterAfter(apiRateLimitFilter, JwtAuthFilter.class);
 
         return http.build();
     }
@@ -67,6 +69,13 @@ public class SecurityConfig {
     }
 
     @Bean
+    public FilterRegistrationBean<ApiRateLimitFilter> apiRateLimitFilterRegistrationBean(ApiRateLimitFilter filter) {
+        FilterRegistrationBean<ApiRateLimitFilter> registration = new FilterRegistrationBean<>(filter);
+        registration.setEnabled(false);
+        return registration;
+    }
+
+    @Bean
     public CorsConfigurationSource corsConfigurationSource(
             @Value("${app.cors.allowed-origins}") List<String> origins
     ) {
@@ -74,6 +83,11 @@ public class SecurityConfig {
         config.setAllowedOrigins(origins.stream().filter(o -> !o.isBlank()).toList());
         config.setAllowedMethods(List.of("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"));
         config.setAllowedHeaders(List.of("Authorization", "Content-Type"));
+        config.setExposedHeaders(List.of(
+                "X-Cache",
+                "X-Idempotent",
+                "X-RateLimit-Remaining",
+                "X-RateLimit-Reset"));
         config.setMaxAge(3600L);
 
         UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();

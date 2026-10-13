@@ -36,7 +36,7 @@ export const useInvalidateStats = () => {
   return useMutation({
     mutationFn: api.invalidateStats,
     onSuccess: async () => {
-      await client.invalidateQueries({ queryKey: ['stats'] })
+      await client.refetchQueries({ queryKey: ['stats'] })
       useAppStore.getState().showToast('Stats cache invalidated.')
     },
   })

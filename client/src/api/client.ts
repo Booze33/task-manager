@@ -6,7 +6,7 @@ export const http = axios.create({ baseURL: API_BASE_URL, timeout: 10_000 })
 
 http.interceptors.request.use((config) => {
   const token = useAppStore.getState().token
-  if (token) config.headers.Authorization = `Bearer ${token}`
+  if (token && !config.headers.Authorization) config.headers.Authorization = `Bearer ${token}`
   return config
 })
 

@@ -1,20 +1,21 @@
 import { create } from 'zustand'
 import { createJSONStorage, persist } from 'zustand/middleware'
 import type { ActivityEntry, User } from '../types'
-import { RATE_LIMIT_MAX } from '../config'
 
 interface AppState {
   user: User | null
   token: string | null
+  refreshToken: string | null
   theme: 'dark' | 'light'
-  rateRemaining: number
+  rateRemaining: number | null
   rateReset: number | null
   activity: ActivityEntry[]
   toast: { id: number; message: string; kind: 'success' | 'error' } | null
-  setAuth: (user: User, token: string) => void
+  setAuth: (user: User, token: string, refreshToken: string | null) => void
+  setTokens: (token: string, refreshToken: string) => void
   clearAuth: () => void
   toggleTheme: () => void
-  setRateLimit: (remaining: number, reset: number | null) => void
+  setRateLimit: (remaining: number | null, reset: number | null) => void
   logActivity: (entry: ActivityEntry) => void
   clearActivity: () => void
   showToast: (message: string, kind?: 'success' | 'error') => void
@@ -26,13 +27,15 @@ export const useAppStore = create<AppState>()(
     (set) => ({
       user: null,
       token: null,
+      refreshToken: null,
       theme: 'dark',
-      rateRemaining: RATE_LIMIT_MAX,
+      rateRemaining: null,
       rateReset: null,
       activity: [],
       toast: null,
-      setAuth: (user, token) => set({ user, token }),
-      clearAuth: () => set({ user: null, token: null }),
+      setAuth: (user, token, refreshToken) => set({ user, token, refreshToken }),
+      setTokens: (token, refreshToken) => set({ token, refreshToken }),
+      clearAuth: () => set({ user: null, token: null, refreshToken: null }),
       toggleTheme: () => set((state) => ({ theme: state.theme === 'dark' ? 'light' : 'dark' })),
       setRateLimit: (rateRemaining, rateReset) => set({ rateRemaining, rateReset }),
       logActivity: (entry) => set((state) => ({ activity: [entry, ...state.activity].slice(0, 40) })),
@@ -45,9 +48,9 @@ export const useAppStore = create<AppState>()(
       dismissToast: () => set({ toast: null }),
     }),
     {
-      name: 'taskflow-preferences',
+      name: 'taskflow-session',
       storage: createJSONStorage(() => localStorage),
-      partialize: (state) => ({ user: state.user, token: state.token, theme: state.theme }),
+      partialize: (state) => ({ user: state.user, token: state.token, refreshToken: state.refreshToken, theme: state.theme }),
     },
   ),
 )
